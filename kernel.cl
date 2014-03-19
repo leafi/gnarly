@@ -1,30 +1,38 @@
-#define RADIUS 0
+/*#define RADIUS 0
 #define X 1
 #define Y 2
-#define Z 3
+#define Z 3*/
 
-float sphereHit(global float* s, float ox1, float oy1)
+typedef struct
 {
-  float dx = ox1 - s[X];
-  float dy = oy1 - s[Y];
+  float radius;
+  float x;
+  float y;
+  float z;
+} Sphere;
+
+float sphereHit(Sphere* s, float ox1, float oy1)
+{
+  float dx = ox1 - s->x;
+  float dy = oy1 - s->y;
   
-  if (dx * dx + dy * dy < s[RADIUS] * s[RADIUS]) {
-    float dz = sqrt(s[RADIUS] * s[RADIUS] - dx * dx - dy * dy);
-    return dz + s[Z];
+  if (dx * dx + dy * dy < s->radius * s->radius) {
+    float dz = sqrt(s->radius * s->radius - dx * dx - dy * dy);
+    return dz + s->z;
   }
   
   return 2e10f;
 }
 
-float interSphere(global float* s1, global float* s2, float minBlobRadius, float boost, float ox1, float oy1)
+float interSphere(Sphere* s1, Sphere* s2, float minBlobRadius, float boost, float ox1, float oy1)
 {
   // draw line between spheres
-  float lx = s2[X] - s1[X];
-  float ly = s2[Y] - s1[Y];
+  float lx = s2->x - s1->x;
+  float ly = s2->y - s1->y;
   float incline = ly / lx; // !!! divZero
 
-  float x1 = ox1 - s1[X];
-  float y1 = oy1 - s1[Y];
+  float x1 = ox1 - s1->x;
+  float y1 = oy1 - s1->y;
   
   // find point on line for ray
   float rx = x1;
@@ -37,20 +45,20 @@ float interSphere(global float* s1, global float* s2, float minBlobRadius, float
   if (linprog > 1.0f)
     return 2e10f;
 
-  float s1ra = s1[RADIUS] - minBlobRadius;
-  float s2ra = s2[RADIUS] - minBlobRadius;
+  float s1ra = s1->radius - minBlobRadius;
+  float s2ra = s2->radius - minBlobRadius;
   float lap = minBlobRadius;
 
   float prog = 1.0f + sin(M_PI + linprog * M_PI);
   lap += prog * (linprog > 0.5f ? s2ra : s1ra) * boost;
 
-  if ((ry + s1[Y] - oy1) < lap && (ry + s1[Y] - oy1) > -lap)
-    return sqrt(s1[RADIUS] * s1[RADIUS] - (x1 - lx / 2.0f) * (x1 - lx / 2.0f) - (y1 - ly / 2.0f) * (y1 - ly / 2.0f));
+  if ((ry + s1->y - oy1) < lap && (ry + s1->y - oy1) > -lap)
+    return sqrt(s1->radius * s1->radius - (x1 - lx / 2.0f) * (x1 - lx / 2.0f) - (y1 - ly / 2.0f) * (y1 - ly / 2.0f));
 
   return 2e10f;
 }
 
-float getIntensityForPixel(global float* s, global float* s2, int x, int y)
+float getIntensityForPixel(Sphere* s, Sphere* s2, int x, int y)
 {
   float f = clamp((300.0f - sphereHit(s, x - WIDTH_DIV_2, y - HEIGHT_DIV_2)) / 300.0f, 0.0f, 1.0f);
   f += clamp((300.0f - sphereHit(s2, x - WIDTH_DIV_2, y - HEIGHT_DIV_2)) / 300.0f, 0.0f, 1.0f);
@@ -61,7 +69,7 @@ float getIntensityForPixel(global float* s, global float* s2, int x, int y)
   return f;
 }
 
-kernel void helloWorld(global float* s, global float* s2, write_only image2d_t outimg)
+kernel void helloWorld(Sphere s, Sphere s2, write_only image2d_t outimg)
 {
   float f;
   uchar intensity;
@@ -75,7 +83,7 @@ kernel void helloWorld(global float* s, global float* s2, write_only image2d_t o
 
   /*for (int y = 0; y < HEIGHT; y++) {
     for (int x = 0; x < WIDTH; x++) {*/
-      f = clamp(getIntensityForPixel(s, s2, x, y), 0.0f, 1.0f);
+      f = clamp(getIntensityForPixel(&s, &s2, x, y), 0.0f, 1.0f);
 
       // float -> uchar
       intensity = (uchar) (255.0f * f);

@@ -11,13 +11,22 @@ namespace gnarly
 {
   class Program
   {
-    public const int RADIUS = 0;
-    public const int X = 1;
-    public const int Y = 2;
-    public const int Z = 3;
-
     public const int WIDTH = 1920;
     public const int HEIGHT = 1080;
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct Sphere
+    {
+      public float Radius;
+      public float X;
+      public float Y;
+      public float Z;
+
+      public Sphere(float radius, float x, float y, float z)
+      {
+        Radius = radius; X = x; Y = y; Z = z;
+      }
+    }
 
     public static void Main(string[] args)
     {
@@ -29,8 +38,6 @@ namespace gnarly
       Console.WriteLine("Picking first platform. If you need a different one, or a non-GPU, this code needs changin'.");
 
       var platform = ComputePlatform.Platforms[0];
-
-
       var d = new ComputeContextNotifier((s, t, u, v)  => Console.WriteLine(s));
       ComputeContext context = new ComputeContext(ComputeDeviceTypes.Gpu, new ComputeContextPropertyList(ComputePlatform.Platforms[0]), d, IntPtr.Zero);
       
@@ -76,25 +83,18 @@ namespace gnarly
       var gcMessage = GCHandle.Alloc(message);
       ComputeBuffer<int> buffer = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, message);
 
-      var sph = new float[4];
-      sph[X] = -200;
-      sph[Y] = 0;
-      sph[Z] = 150;
-      sph[RADIUS] = 100;
+      var sph = new Sphere(100, -200, 0, 150);
+      var sph2 = new Sphere(100, 100, -100, 150);
 
-      var sph2 = new float[4];
-      sph2[X] = 100;
-      sph2[Y] = -100;
-      sph2[Z] = 150;
-      sph2[RADIUS] = 100;
-
-      ComputeBuffer<float> sphB = new ComputeBuffer<float>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, sph);
-      ComputeBuffer<float> sph2B = new ComputeBuffer<float>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, sph2);
+      //ComputeBuffer<Sphere> sphB = new ComputeBuffer<Sphere>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, 1, );
+      //ComputeBuffer<Sphere> sph2B = new ComputeBuffer<float>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.CopyHostPointer, sph2);
 
       ComputeImage2D outimg = new ComputeImage2D(context, ComputeMemoryFlags.WriteOnly | ComputeMemoryFlags.AllocateHostPointer, new ComputeImageFormat(ComputeImageChannelOrder.Rgba, ComputeImageChannelType.UnsignedInt8), WIDTH, HEIGHT, 0, IntPtr.Zero);
 
-      kernel.SetMemoryArgument(0, sphB);
-      kernel.SetMemoryArgument(1, sph2B);
+      kernel.SetValueArgument<Sphere>(0, sph);
+      kernel.SetValueArgument<Sphere>(1, sph2);
+      //kernel.SetMemoryArgument(0, sphB);
+      //kernel.SetMemoryArgument(1, sph2B);
       kernel.SetMemoryArgument(2, outimg);
 
 
