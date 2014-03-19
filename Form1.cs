@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Data;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
 
@@ -16,40 +17,28 @@ namespace gnarly
       InitializeComponent();
     }
 
-    public void DrawOut(float[,] drawing)
+    bool weManualNow = false;
+    int bmpLen = 0;
+
+    public void DrawOut(Cloo.ComputeImage2D outimg, Cloo.ComputeCommandQueue queue)
     {
-      this.Size = new Size(drawing.GetLength(0), drawing.GetLength(1));
+      this.Size = new Size(outimg.Width, outimg.Height);
+
       var g = this.CreateGraphics();
 
-      var bmp = new Bitmap(drawing.GetLength(0), drawing.GetLength(1));
-      var bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+      var bmp = new Bitmap(outimg.Width, outimg.Height);
+      var bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
 
-      int y = 0;
-      int x = 0;
+      if (weManualNow && bmpLen != outimg.Size)
+        Marshal.FreeHGlobal(bd.Scan0);
+      
+      bd.Scan0 = Marshal.AllocHGlobal((int) outimg.Size);
+      bmpLen = (int) outimg.Size;
+      weManualNow = true;
+      
+      bd.Stride = (int) outimg.RowPitch;
 
-      while (y < drawing.GetLength(1))
-      {
-        while (x < drawing.GetLength(0))
-        {
-          var d = (byte)((int)Math.Min(255f, Math.Max(0f, drawing[x, y] * 256.0f)));
-
-          unsafe
-          {
-            byte* ptr = (byte*)bd.Scan0;
-            ptr += bd.Stride * y;
-            ptr += x * 3;
-
-            *ptr = d;
-            ptr++;
-            *ptr = d;
-            ptr++;
-            *ptr = d;
-          }
-          x++;
-        }
-        y++;
-        x = 0;
-      }
+      queue.ReadFromImage(outimg, bd.Scan0, true, null);
 
       bmp.UnlockBits(bd);
       bd = null;
@@ -58,6 +47,5 @@ namespace gnarly
       g.Flush();
       g.Dispose();
     }
-
   }
 }
