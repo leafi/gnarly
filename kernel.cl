@@ -70,8 +70,11 @@ kernel void helloWorld(global float* s, global float* s2, write_only image2d_t o
   uchar b;
   uint4 outc;
 
-  for (int y = 0; y < HEIGHT; y++) {
-    for (int x = 0; x < WIDTH; x++) {
+  size_t x = get_global_id(0);
+  size_t y = get_global_id(1);
+
+  /*for (int y = 0; y < HEIGHT; y++) {
+    for (int x = 0; x < WIDTH; x++) {*/
       f = clamp(getIntensityForPixel(s, s2, x, y), 0.0f, 1.0f);
 
       // float -> uchar
@@ -86,7 +89,7 @@ kernel void helloWorld(global float* s, global float* s2, write_only image2d_t o
 #endif
 
       write_imageui(outimg, (int2)(x, y), outc);
-    }
-  }
+    /*}
+  }*/
 }
 
