@@ -11,8 +11,8 @@ namespace gnarly
 {
   class Program
   {
-    public const int WIDTH = 1920;
-    public const int HEIGHT = 1080;
+    public const int WIDTH = 1280;
+    public const int HEIGHT = 720;
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct Sphere
@@ -26,6 +26,64 @@ namespace gnarly
       {
         Radius = radius; X = x; Y = y; Z = z;
       }
+    }
+
+    public const uint AFLAGS_SIMPLE = ((uint)1) << 31;
+    public const uint AFLAGS_SOLID = ((uint)1) << 30;
+    public const uint AFLAGS_ANIMATED = ((uint)1) << 29; // animated -> skip render during static pass
+
+    //[StructLayout(LayoutKind.Explicit)]
+    public struct Voxel
+    {
+      //[FieldOffset(0)]
+      public uint FTL;
+      //[FieldOffset(4)]
+      public uint FTR;
+      //[FieldOffset(8)]
+      public uint FBL;
+      //[FieldOffset(12)]
+      public uint FBR;
+      //[FieldOffset(16)]
+      public uint BTL;
+      //[FieldOffset(20)]
+      public uint BTR;
+      //[FieldOffset(24)]
+      public uint BBL;
+      //[FieldOffset(28)]
+      public uint BBR;
+
+      //[FieldOffset(0)]
+      public uint AFlags;
+      //[FieldOffset(4)]
+      public uint MaterialIdx;
+      //[FieldOffset(8)]
+      public uint MaterialParam;
+      //[FieldOffset(12)]
+      public uint LightingIdx; // index into voxel lighting data array
+      //[FieldOffset(16)]
+      public uint ObjectId; // index of object this voxel is part of
+      //[FieldOffset(20)]
+      public uint Reserved1;
+      //[FieldOffset(24)]
+      public uint Reserved2;
+      //[FieldOffset(28)]
+      public uint Reserved3;
+    }
+
+    public static List<uint> voxelToUint(Voxel v)
+    {
+      var l = new List<uint>();
+
+      l.Add(v.AFlags | v.FTL);
+      l.Add(v.MaterialIdx | v.FTR);
+      l.Add(v.MaterialParam | v.FBL);
+      l.Add(v.LightingIdx | v.FBR);
+      l.Add(v.ObjectId | v.BTL);
+      l.Add(v.Reserved1 | v.BTR);
+      l.Add(v.Reserved2 | v.BBL);
+      l.Add(v.Reserved3 | v.BBR);
+
+      return l;
     }
 
     public static void Main(string[] args)
@@ -76,8 +134,9 @@ namespace gnarly
       }
       
       Console.WriteLine(clp.GetBuildLog(device));
+      Console.ReadLine();
 
-      var kernel = clp.CreateKernel("helloWorld");
+      var kernel = clp.CreateKernel("helloVoxel");
 
       int[] message = new int[] { 1, 2, 3 };
       var gcMessage = GCHandle.Alloc(message);
@@ -91,8 +150,27 @@ namespace gnarly
 
       ComputeImage2D outimg = new ComputeImage2D(context, ComputeMemoryFlags.WriteOnly | ComputeMemoryFlags.AllocateHostPointer, new ComputeImageFormat(ComputeImageChannelOrder.Rgba, ComputeImageChannelType.UnsignedInt8), WIDTH, HEIGHT, 0, IntPtr.Zero);
 
-      kernel.SetValueArgument<Sphere>(0, sph);
-      kernel.SetValueArgument<Sphere>(1, sph2);
+      // one voxel, bounds -256 to 256
+      // 100 radius sphere in this voxel, pos 0,0,128
+      var sp = new Sphere(256, 0, 0, 128);
+      //uint bigvox = makeVoxelForSphere(sph, -256, -256, -256, 512);
+      uint bigvox = makeSampleCubel();
+
+      /*Voxel[] voxes = voxels.ToArray();
+      ComputeBuffer<Voxel> voxesBuffer = new ComputeBuffer<Voxel>(context, ComputeMemoryFlags.ReadWrite | ComputeMemoryFlags.CopyHostPointer, voxes);*/
+
+      List<uint> lui = new List<uint>();
+      for (int i = 0; i < voxels.Count; i++)
+        lui.AddRange(voxelToUint(voxels[i]));
+      uint[] luit = lui.ToArray();
+
+      ComputeBuffer<uint> uintBuffer = new ComputeBuffer<uint>(context, ComputeMemoryFlags.ReadWrite | ComputeMemoryFlags.CopyHostPointer, luit);
+
+      kernel.SetMemoryArgument(0, uintBuffer);
+      kernel.SetValueArgument(1, bigvox);
+
+      //kernel.SetValueArgument<Sphere>(0, sph);
+      //kernel.SetValueArgument<Sphere>(1, sph2);
       //kernel.SetMemoryArgument(0, sphB);
       //kernel.SetMemoryArgument(1, sph2B);
       kernel.SetMemoryArgument(2, outimg);
@@ -120,5 +198,141 @@ namespace gnarly
       Console.ReadLine();
     }
 
+    static uint makeSampleCubel()
+    {
+      // add big voxel
+      Voxel v = new Voxel(); // 0
+      Voxel empty = new Voxel(); // 1
+      empty.AFlags = AFLAGS_SIMPLE;
+      Voxel full = new Voxel(); // 2
+      full.AFlags = AFLAGS_SIMPLE | AFLAGS_SOLID;
+
+
+      v.AFlags = 0;
+      v.FTL = 1;
+      v.FTR = 1;
+      v.FBL = 1;
+      v.BTL = 1;
+      v.BTR = 1;
+      v.BBL = 1;
+      v.BBR = 1;
+      Voxel v2 = new Voxel(); // 3
+      v.FBR = 3;
+
+      v2.AFlags = 0;
+      v2.FTL = 1;
+      v2.FTR = 1;
+      v2.FBL = 1;
+      v2.FBR = 1;
+      v2.BTL = 2;
+      v2.BTR = 1;
+      v2.BBL = 1;
+      v2.BBR = 2;
+      voxels.Add(v);
+      voxels.Add(empty);
+      voxels.Add(full);
+      voxels.Add(v2);
+      return 0;
+    }
+
+    static List<Voxel> voxels = new List<Voxel>();
+
+    static uint makeVoxelForSphere(Sphere sph, int xmin, int ymin, int zmin, int vsize)
+    {
+      int xmax = xmin + vsize;
+      int ymax = ymin + vsize;
+      int zmax = zmin + vsize;
+      int xmid = (xmax - xmin) / 2 + xmin;
+      int ymid = (ymax - ymin) / 2 + ymin;
+      int zmid = (zmax - zmin) / 2 + zmin;
+
+      // because sphere, we can just sample at each corner point
+      /*bool pxlylzl = pointInSphere(sph, xmin, ymin, zmin);
+      bool pxmylzl = pointInSphere(sph, xmax, ymin, zmin);
+      bool pxlymzl = pointInSphere(sph, xmin, ymax, zmin);
+      bool pxmymzl = pointInSphere(sph, xmax, ymax, zmin);
+      bool pxlylzm = pointInSphere(sph, xmin, ymin, zmax);
+      bool pxmylzm = pointInSphere(sph, xmax, ymin, zmax);
+      bool pxlymzm = pointInSphere(sph, xmin, ymax, zmax);
+      bool pxmymzm = pointInSphere(sph, xmax, ymax, zmax);*/
+
+      /*bool[] samples = new bool[] {
+        pointInSphere(sph, xmin, ymin, zmin),
+        pointInSphere(sph, xmax, ymin, zmin),
+        pointInSphere(sph, xmin, ymax, zmin),
+        pointInSphere(sph, xmax, ymax, zmin),
+        pointInSphere(sph, xmin, ymin, zmax),
+        pointInSphere(sph, xmax, ymin, zmax),
+        pointInSphere(sph, xmin, ymax, zmax),
+        pointInSphere(sph, xmax, ymax, zmax),
+        pointInSphere(sph, xmid, ymid, zmid)
+      };*/
+
+      List<bool> samples = new List<bool>();
+
+      var r = new Random();
+      for (int i = 0; i < (vsize / 10 < 4 ? 4 : vsize / 10); i++)
+        samples.Add(pointInSphere(sph, r.Next(xmin, xmax), r.Next(ymin, ymax), r.Next(zmin, zmax)));
+
+      // did all samples hit, none, or some?
+      int hit = samples.Count(b => b);
+
+      if (hit == 0)
+      {
+        Voxel vempty = new Voxel();
+        vempty.AFlags = AFLAGS_SIMPLE;
+        voxels.Add(vempty);
+        return (uint) voxels.Count - 1;
+      }
+      else if (hit == samples.Count)
+      {
+        Voxel vsolid = new Voxel();
+        vsolid.AFlags = AFLAGS_SIMPLE | AFLAGS_SOLID;
+        voxels.Add(vsolid);
+        return (uint) voxels.Count - 1;
+      }
+      else if (vsize == 1)
+      {
+        // if vsize is 1, we can't go any less so we need to make an approximation.
+        Voxel vapprox = new Voxel();
+        vapprox.AFlags = AFLAGS_SIMPLE | (hit > 4 ? AFLAGS_SOLID : 0);
+        voxels.Add(vapprox);
+        return (uint) voxels.Count - 1;
+      }
+      else
+      {
+        // recurse down & make subvoxels.
+        Voxel v = new Voxel();
+        v.AFlags = 0;
+        int vs = vsize / 2;
+
+        v.FTL = makeVoxelForSphere(sph, xmin, ymin, zmin, vs);
+        v.FTR = makeVoxelForSphere(sph, xmid, ymin, zmin, vs);
+        v.FBL = makeVoxelForSphere(sph, xmin, ymid, zmin, vs);
+        v.FBR = makeVoxelForSphere(sph, xmid, ymid, zmin, vs);
+
+        v.BTL = makeVoxelForSphere(sph, xmin, ymin, zmid, vs);
+        v.BTR = makeVoxelForSphere(sph, xmid, ymin, zmid, vs);
+        v.BBL = makeVoxelForSphere(sph, xmin, ymid, zmid, vs);
+        v.BBR = makeVoxelForSphere(sph, xmid, ymid, zmid, vs);
+
+        voxels.Add(v);
+        uint vi = (uint) voxels.Count - 1;
+        return vi;
+      }
+    }
+
+    static bool pointInSphere(Sphere sph, int x, int y, int z)
+    {
+      // get point in terms of sphere coords
+      float px = x - sph.X;
+      float py = y - sph.Y;
+      float pz = z - sph.Z;
+
+      // is length of p vector less than or equal to sphere radius?
+      return (Math.Sqrt(px * px + py * py + pz * pz) <= sph.Radius);
+    }
+
   }
+
 }
