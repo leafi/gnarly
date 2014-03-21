@@ -29,10 +29,8 @@ namespace gnarly
       var bmp = new Bitmap(outimg.Width, outimg.Height);
       var bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
 
-      if (weManualNow && bmpLen != outimg.Size)
-        Marshal.FreeHGlobal(bd.Scan0);
-      
-      bd.Scan0 = Marshal.AllocHGlobal((int) outimg.Size);
+      if (!weManualNow)
+        bd.Scan0 = Marshal.AllocHGlobal((int) outimg.Size);
       bmpLen = (int) outimg.Size;
       weManualNow = true;
       

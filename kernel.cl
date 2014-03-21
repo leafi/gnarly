@@ -11,7 +11,6 @@ typedef struct
   float z;
 } Sphere;
 
-#pragma pack(push, 1)
 
 typedef struct __attribute__ ((packed))
 {
@@ -37,9 +36,9 @@ typedef struct __attribute__ ((packed))
   uint Reserved3;
 } SimpleVoxel;
 
-#define AFLAGS_SIMPLE ((uint)1 << 31)
-#define AFLAGS_SOLID (1 << 30)
-#define AFLAGS_ANIMATED (1 << 29)
+#define AFLAGS_SIMPLE (1 << 30)
+#define AFLAGS_SOLID (1 << 29)
+#define AFLAGS_ANIMATED (1 << 28)
 
 /*typedef struct __attribute__ ((packed))
 {
@@ -82,7 +81,7 @@ void setup_ray(Ray* ray, float3 origin, float3 direction)
 }
 
 // https://github.com/hpicgs/cgsee/wiki/Ray-Box-Intersection-on-the-GPU
-void ray_aabb_intersection_distance(Voxel* v, Ray* ray, float3* aabb, float* tmin, float* tmax)
+void ray_aabb_intersection_distance2(Ray* ray, float3* aabb, float* tmin, float* tmax)
 {
   float tymin, tymax, tzmin, tzmax;
   *tmin = (aabb[ray->sign.x].x - ray->origin.x) * ray->inv_direction.x;
@@ -101,18 +100,50 @@ void ray_aabb_intersection_distance(Voxel* v, Ray* ray, float3* aabb, float* tmi
   //     back intersection point  = ray.origin + ray.direction * tmax
 }
 
+/*float ray_aabb_intersection_distance2(Ray* ray, float3* aabb) {
+  float tmin, tmax, tymin, tymax, tzmin, tzmax;
+  tmin = (aabb[ray->sign.x].x - ray->origin.x) * ray->inv_direction.x;
+  tmax = (aabb[1-ray->sign.x].x - ray->origin.x) * ray->inv_direction.x;
+  tymin = (aabb[ray->sign.y].y - ray->origin.y) * ray->inv_direction.y;
+  tymax = (aabb[1-ray->sign.y].y - ray->origin.y) * ray->inv_direction.y;
+  if ( (tmin > tymax) || (tymin > tmax) ) return INFINITY;
+  tmin = min(tmin, tymin);
+  tmax = max(tmax, tymax);
+  tzmin = (aabb[ray->sign.z].z - ray->origin.z) * ray->inv_direction.z;
+  tzmax = (aabb[1-ray->sign.z].z - ray->origin.z) * ray->inv_direction.z;
+  if ( (tmin > tzmax) || (tzmin > tmax) ) return INFINITY;
+  tmin = min(tmin, tzmin);
+  //tmax = max(tmay, tzmax);
+  return tmin;
+}*/
+
+/*bool ray_aabb_intersection_distance(Ray* ray, float3* aabb) {
+  float tmin; float tmax;
+  ray_aabb_intersection_distance2(ray, aabb, &tmin, &tmax);
+  return (tmin < tmax);
+}*/
+
+bool ray_aabb_intersection_distance(Ray* ray, float3* aabb) {
+  // VERY BAD
+  if (ray->origin.x > aabb[0].x && ray->origin.y > aabb[0].y && ray->origin.x <= aabb[1].x && ray->origin.y <= aabb[1].y) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
 int getVoxelIntensityForPixelStep(Voxel* vox, Ray* ray, float3* aabb, float3* intersect, float3* backIntersect)
 {
   // do we hit this voxel?
-  float tmin; float tmax;
-  ray_aabb_intersection_distance(vox, ray, aabb, &tmin, &tmax);
+  bool tmin; float tmax;
+  //ray_aabb_intersection_distance(ray, aabb, &tmin, &tmax);
+  tmin = ray_aabb_intersection_distance(ray, aabb);
 
-  if (tmin > tmax) {
+  if (!tmin) {
     // no intersection
     return -1;
   } else {
-    *intersect = ray->origin + ray->direction * tmin;
-    *backIntersect = ray->origin + ray->direction * tmax;
+    //*intersect = ray->origin + ray->direction * tmin;
 
     // do we need to go deeper?
     if ((vox->AFlags & AFLAGS_SIMPLE) == 0) {
@@ -155,21 +186,22 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
 
   // problem: we might need to search up to 3 subvoxels to get the right answer.
   // ringbuffer lets us search multiple subvoxels.
-/*#define RING_LENGTH 16
-  uint ring[RING_LENGTH];
+  #define RING_LENGTH 64
+  Voxel ring[RING_LENGTH];
+  float3 ringAabb0[RING_LENGTH];
+  float3 ringAabb1[RING_LENGTH];
   int ringFront = 0;
-  int ringBack = 0;*/
+  int ringBack = 0;
 
-  // for now we aren't solving the problem properly.
-  // we'll just check if the front result voxel is simple & empty, and if so, use the back result instead.
-
-  for (int i = 0; i < 16; i++) {
+  for (int i = 0; i < 128; i++) {
+  //while (true) {
     //printf("round %d\n", i);
     // do cast
     r = getVoxelIntensityForPixelStep(&voxBig, &ray, aabb, &intersect, &backIntersect);
 
     if (r == 1) {
       // WE MUST GO DEEPER.
+      //printf("%s", "DEEEPER\n");
 
       float minx = aabb[0].x;
       float maxx = aabb[1].x;
@@ -180,8 +212,126 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       float minz = aabb[0].z;
       float maxz = aabb[1].z;
       float midz = (maxz - minz) * 0.5f + minz;
+      float vs = (maxx - minx) * 0.5f;
 
-      int hack = 0;
+      float3 testaabb[2];
+      bool tmin; float tmax;
+      //float3 ir;
+
+      int c = 0;
+
+      // TODO: sort results, add in closest order!!!!!
+      
+      // FTL
+      //printf("%s", "hi0\n");
+      testaabb[0] = (float3)(minx, miny, minz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      //ir = ray.origin + ray.direction * tmin;
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.AFlags];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+
+      // FTR
+      //printf("%s", "hi1\n");
+      testaabb[0] = (float3)(midx, miny, minz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      //ir = ray.origin + ray.direction * tmin;
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.FTR];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+ 
+      // FBL
+      //printf("%s", "hi2\n");
+      testaabb[0] = (float3)(minx, midy, minz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      //ir = ray.origin + ray.direction * tmin;
+
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.FBL];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+
+      // FBR
+      //printf("%s", "hi3\n");
+      testaabb[0] = (float3)(midx, midy, minz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      //ir = ray.origin + ray.direction * tmin;
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.FBR];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+
+      // BTL
+      //printf("%s", "hi4\n");
+      testaabb[0] = (float3)(minx, miny, midz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      //printf("BTL 0 %f %f %f 1 %f %f %f\n", testaabb[0].x, testaabb[0].y, testaabb[0].z, testaabb[1].x, testaabb[1].y, testaabb[1].z);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.BTL];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+
+      // BTR
+      //printf("%s", "hi5\n");
+      testaabb[0] = (float3)(midx, miny, midz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.BTR];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+
+      // BBL
+      testaabb[0] = (float3)(minx, midy, midz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.BBL];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+
+      // BBR
+      testaabb[0] = (float3)(midx, midy, midz);
+      testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      if (tmin) {
+        ring[ringBack] = voxels[voxBig.BBR];
+        ringAabb0[ringBack] = testaabb[0];
+        ringAabb1[ringBack] = testaabb[1];
+        ringBack = (ringBack + 1) % RING_LENGTH;
+        c++;
+      }
+      
+      
+      /*int hack = 0;
       int bees = 1;
       // front or back?
       if (intersect.z > midz) {
@@ -210,7 +360,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       aabb[bees].x = midx;
       bees = 1;
       
-      int nextIdx = ((uint*)&voxBig)[hack];
+      int nextIdx = ((uint*)&voxBig)[hack];*/
       //printf("DEEPER to %d (px %f %f) \n    (aabb0 %f %f %f aabb1 %f %f %f) \n    (intersect %f %f %f)\n", nextIdx, x, y, aabb[0].x, aabb[0].y, aabb[0].z, aabb[1].x, aabb[1].y, aabb[1].z, intersect.x, intersect.y, intersect.z);
       
 
@@ -220,56 +370,62 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //  subvoxel, find the 3 it could be, and add them to the ring buffer to be checked.)
       // ((will that be slow?  NO idea.  i think i need better data before i can start checking that!))
       
-      if ((voxels[nextIdx].AFlags & (AFLAGS_SIMPLE | AFLAGS_SOLID)) == AFLAGS_SIMPLE) {
-        intersect = backIntersect;
-        hack = 0;
-        bees = 1;
-        aabb[0] = (float3)(minx, miny, minz);
-        aabb[1] = (float3)(maxx, maxy, maxz);
+      
 
-        // front or back?
-        if (intersect.z > midz) {
-          // back!
-          bees = 0;
-          hack = 4;
-        }
-        aabb[bees].z = midz;
-        bees = 1;
+      /*ring[ringBack] = voxels[nextIdx];
+      ringAabb0[ringBack] = aabb[0];
+      ringAabb1[ringBack] = aabb[1];
 
-        // top or bottom?
-        if (intersect.y > midy) {
-          // bottom!
-          bees = 0;
-          hack += 2;
-        }
-        aabb[bees].y = midy;
-        bees = 1;
+      ringBack++;
+      if (ringBack >= RING_LENGTH) {
+        ringBack = 0;
+      }*/
 
-        // left or right?
-        if (intersect.x > midx) {
-          // right!
-          bees = 0;
-          hack++;
-        }
-        aabb[bees].x = midx;
-        bees = 1;
-        
-        nextIdx = ((uint*)&voxBig)[hack];
-        //printf("DEEPER to %d (px %f %f) \n    (aabb0 %f %f %f aabb1 %f %f %f) \n    (intersect %f %f %f)\n", nextIdx, x, y, aabb[0].x, aabb[0].y, aabb[0].z, aabb[1].x, aabb[1].y, aabb[1].z, intersect.x, intersect.y, intersect.z);
-        
-      }
-
-      voxBig = voxels[nextIdx];
-
-    } else {
+    } else if (r == 0) {
       // Simple! :)
-      //printf("SIMPLE\n");
-      if (r == -1) {
-        return 0.0f;
-      } else {
-        //printf("%s", "BRIGHT\n");
-        return 1.0f;
+      //printf("%s", "BRIGHT\n");
+
+
+      // Let's light this bad boy!
+      float3 lightPosition = (float3)(100.0f, -100.0f, -200.0f);
+      float3 diffuseColor = (float3)(1.0f, 1.0f, 1.0f);
+      float diffusePower = 100000.0f;
+      // blah blah todo specular
+
+      // from voxel
+      float3 voxPosition = aabb[0]; // TODO: MAKE BETTER
+      voxPosition.x = x;
+      voxPosition.y = y;
+      float3 viewDir = (float3)(0.0f, 0.0f, 1.0f);
+      // sphere hack. should be stored on voxel or summat!
+      float3 normal = normalize(voxPosition - (float3)(0.0f, 0.0f, 128.0f));
+
+      float3 lightDir = lightPosition - voxPosition;
+      float distance = length(lightDir);
+      lightDir = lightDir / distance;
+      distance = distance * distance;
+
+      float nDotL = dot(normal, lightDir);
+      float intensity = clamp(nDotL, 0.0f, 1.0f);
+
+      return 0.5f + intensity * diffuseColor.x * diffusePower / distance;
+    }
+
+    // no result?
+    // pull from ring buffer
+    if (ringFront != ringBack) {
+      voxBig = ring[ringFront];
+      aabb[0] = ringAabb0[ringFront];
+      aabb[1] = ringAabb1[ringFront];
+
+      ringFront++;
+      if (ringFront >= RING_LENGTH) {
+        ringFront = 0;
       }
+    } else {
+      // out of candidates? then we're done.
+      //printf("%s", "out of candidates\n");
+      return 0.0f;
     }
 
   } // end for
@@ -293,7 +449,7 @@ kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t out
   size_t x = get_global_id(0);
   size_t y = get_global_id(1);
 
-  f = clamp(getVoxelIntensityForPixel(voxels, svox, x - WIDTH_DIV_2, y - HEIGHT_DIV_2), 0.0f, 1.0f);
+  f = clamp(getVoxelIntensityForPixel(voxels, svox, (float)x - (float)WIDTH_DIV_2, (float)y - (float)HEIGHT_DIV_2), 0.0f, 1.0f);
 
   // float -> uchar
   intensity = (uchar) (255.0f * f);
