@@ -8,6 +8,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Threading;
+using System.Diagnostics;
 
 namespace gnarly
 {
@@ -119,32 +120,39 @@ namespace gnarly
 
       ComputeCommandQueue queue = new ComputeCommandQueue(context, context.Devices[0], ComputeCommandQueueFlags.None);
 
-      var cl = File.ReadAllText("../../../kernel.cl");
+      var fn = File.Exists("kernel.cl") ? "kernel.cl" : 
+        File.Exists("../../kernel.cl") ? "../../kernel.cl" : 
+        File.Exists("../../../kernel.cl") ? "../../../kernel.cl" : "kernel.cl";
+
+      var cl = File.ReadAllText(fn);
       ComputeProgram clp = new ComputeProgram(context, cl);
+      var hclp = new ComputeProgram(context, cl);
       try
       {
         var plat = Environment.OSVersion.Platform;
         var win = (plat == PlatformID.Win32NT || plat == PlatformID.Win32Windows);
-        clp.Build(null, (win ? "-DBGRA " : null) + " -DWIDTH=" + WIDTH + " -DWIDTH_DIV_2=" + (WIDTH / 2) + " -DHEIGHT=" + HEIGHT + " -DHEIGHT_DIV_2=" + (HEIGHT / 2), null, IntPtr.Zero);
+        var kargs = (win ? "-DBGRA " : null) + /*"-DM_PI=" + Math.PI +*/ " -DWIDTH=" + WIDTH + " -DWIDTH_DIV_2=" + (WIDTH / 2) + " -DHEIGHT=" + HEIGHT + " -DHEIGHT_DIV_2=" + (HEIGHT / 2);
+        clp.Build(null, kargs, null, IntPtr.Zero);
+        hclp.Build(null, "-DHALP " + kargs, null, IntPtr.Zero);
       }
       catch (Exception e)
       {
         Console.WriteLine("### KERNEL.CL BUILD FAILURE");
         Console.WriteLine(clp.GetBuildLog(device));
-        Console.ReadLine();
         return;
       }
       
       Console.WriteLine(clp.GetBuildLog(device));
 
       var kernel = clp.CreateKernel("helloVoxel");
+      var hkernel = hclp.CreateKernel("helloVoxel");
 
-      int[] message = new int[] { 1, 2, 3 };
+      /*int[] message = new int[] { 1, 2, 3 };
       var gcMessage = GCHandle.Alloc(message);
-      ComputeBuffer<int> buffer = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, message);
-
+      ComputeBuffer<int> buffer = new ComputeBuffer<int>(context, ComputeMemoryFlags.ReadOnly | ComputeMemoryFlags.UseHostPointer, message);*/
 
       ComputeImage2D outimg = new ComputeImage2D(context, ComputeMemoryFlags.WriteOnly | ComputeMemoryFlags.AllocateHostPointer, new ComputeImageFormat(ComputeImageChannelOrder.Rgba, ComputeImageChannelType.UnsignedInt8), WIDTH, HEIGHT, 0, IntPtr.Zero);
+      ComputeImage2D houtimg = new ComputeImage2D(context, ComputeMemoryFlags.WriteOnly | ComputeMemoryFlags.AllocateHostPointer, new ComputeImageFormat(ComputeImageChannelOrder.Rgba, ComputeImageChannelType.UnsignedInt8), WIDTH, HEIGHT, 0, IntPtr.Zero);
 
       // one voxel, bounds -256 to 256
       // 100 radius sphere in this voxel, pos 0,0,128
@@ -183,35 +191,102 @@ namespace gnarly
       queue.Finish();
 
       kernel.SetMemoryArgument(0, intBuffer);
+      hkernel.SetMemoryArgument(0, intBuffer);
       //Cloo.Bindings.CL11.SetKernelArg(kernel.Handle, 0, new IntPtr(lui.Count * 4), ptr);
       kernel.SetValueArgument(1, bigvox);
+      hkernel.SetValueArgument(1, bigvox);
 
       //kernel.SetValueArgument<Sphere>(0, sph);
       //kernel.SetValueArgument<Sphere>(1, sph2);
       //kernel.SetMemoryArgument(0, sphB);
       //kernel.SetMemoryArgument(1, sph2B);
       kernel.SetMemoryArgument(2, outimg);
+      hkernel.SetMemoryArgument(2, outimg);
 
 
       // -cl-fast-relaxed-math ?
       // & execute in parallel...
       
       var f = new Form1();
+      f.Text = "Unreal Engine 5";
+
       f.Show();
 
       //queue.ExecuteTask(kernel, null);
+      var sw = new Stopwatch();
+      var tto = new Stopwatch();
+      tto.Start();
+
+      object loch = new object();
+      bool debugpx = false;
+      int debugpxX = -1;
+      int debugpxY = -1;
+
+      f.MouseClick += (object sender, MouseEventArgs e) => {
+        Console.WriteLine("Let's debug pixel (" + e.Location.X + "," + e.Location.Y + ") ((" + (e.Location.X - WIDTH / 2) + "," + (e.Location.Y - HEIGHT / 2) + "))...");
+        lock (loch) {
+          debugpxX = e.Location.X;
+          debugpxY = e.Location.Y;
+          debugpx = true;
+        }
+      };
+
+      bool adrew = false;
+
+      //queue.Execute(kernel, null, new long[] { WIDTH, HEIGHT }, null, null);
+      queue.ExecuteTask(kernel, null);
+      queue.Finish();
+      f.DrawOut(outimg, queue);
+
       while (true)
       {
+        lock (loch) {
+          if (debugpx) {
+            Console.WriteLine("loop loch " + debugpxX + " " + debugpxY);
+            hkernel.SetValueArgument(3, (long) debugpxX);
+            hkernel.SetValueArgument(4, (long) debugpxY);
+            queue.ExecuteTask(hkernel, null);
+            queue.Finish();
+            Console.WriteLine("CPU search results: ");
+            var ltcpu = getVoxelForPixel(bigvox, debugpxX - WIDTH / 2, debugpxY - HEIGHT / 2, -256, -256, -256, 512);
+            Console.Write("Candidates: ");
+            foreach (Tuple<int, int> ti in ltcpu)
+              Console.Write(ti.Item2 + " ");
+            Console.WriteLine();
+            var ltbestz = 9999;
+            var ltbestvi = -1;
+            foreach (Tuple<int, int> lt in ltcpu)
+              if (lt.Item1 < ltbestz) {
+                ltbestz = lt.Item1;
+                ltbestvi = lt.Item2;
+              } else if (lt.Item1 == ltbestz) {
+                Console.WriteLine("NUNIQUEZ PROBLEM");
+              }
+            Console.WriteLine("Best: " + ltbestvi + " (z " + ltbestz + ")");
+            f.DrawOut(outimg, queue, debugpxX, debugpxY);
+            adrew = true;
+            debugpx = false;
+          }
+        }
+        sw.Restart();
         queue.Execute(kernel, null, new long[] { WIDTH, HEIGHT }, null, null);
+        //queue.ExecuteTask(kernel, null);
         queue.Finish();
+        sw.Stop();
+        if (tto.ElapsedMilliseconds >= 1000) {
+          Console.WriteLine(sw.ElapsedMilliseconds + " ms");
+          tto.Restart();
+        }
+        //if (!adrew)
         f.DrawOut(outimg, queue);
+        adrew = false;
         Application.DoEvents();
         Thread.Sleep(1);
         if (!f.Visible)
           return;
       }
 
-      gcMessage.Free();
+      //gcMessage.Free();
 
 
 
@@ -220,7 +295,39 @@ namespace gnarly
       
 
 
-      Console.ReadLine();
+      //console.ReadLine();
+    }
+
+    static List<Tuple<int, int>> getVoxelForPixel(int vi, int x, int y, int xmin, int ymin, int zmin, int vsize)
+    {
+      // cpu impl voxel search
+      var lt = new List<Tuple<int, int>>();
+
+      if (vsize == 0) {
+        Console.WriteLine("!!! BOLLOCKS !!! ");
+      }
+
+      Voxel v = voxels[vi];
+      if ((v.AFlags & AFLAGS_SIMPLE) == AFLAGS_SIMPLE) {
+        // simple!
+        if ((v.AFlags & AFLAGS_SOLID) == AFLAGS_SOLID) {
+          if (x > xmin && y > ymin && (x <= xmin + vsize) && (y <= ymin + vsize)) {
+            lt.Add(new Tuple<int, int>(zmin, vi));
+          }
+        }
+      } else {
+        int vs = vsize / 2;
+        lt.AddRange(getVoxelForPixel(v.FTL, x, y, xmin, ymin, zmin, vs));
+        lt.AddRange(getVoxelForPixel(v.FTR, x, y, xmin + vs, ymin, zmin, vs));
+        lt.AddRange(getVoxelForPixel(v.FBL, x, y, xmin, ymin + vs, zmin, vs));
+        lt.AddRange(getVoxelForPixel(v.FBR, x, y, xmin + vs, ymin + vs, zmin, vs));
+        lt.AddRange(getVoxelForPixel(v.BTL, x, y, xmin, ymin, zmin + vs, vs));
+        lt.AddRange(getVoxelForPixel(v.BTR, x, y, xmin + vs, ymin, zmin + vs, vs));
+        lt.AddRange(getVoxelForPixel(v.BBL, x, y, xmin, ymin + vs, zmin + vs, vs));
+        lt.AddRange(getVoxelForPixel(v.BBR, x, y, xmin + vs, ymin + vs, zmin + vs, vs));
+      }
+
+      return lt;
     }
 
     static int countVoxelDepth(int vi)
