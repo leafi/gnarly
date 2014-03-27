@@ -203,6 +203,11 @@ namespace gnarly
       kernel.SetMemoryArgument(2, outimg);
       hkernel.SetMemoryArgument(2, outimg);
 
+      kernel.SetValueArgument(3, 0.2f); // vfx
+      hkernel.SetValueArgument(3, 0.2f); // vfx
+      kernel.SetValueArgument(4, 0.2f); // vfy
+      hkernel.SetValueArgument(4, 0.2f); // vfy
+
 
       // -cl-fast-relaxed-math ?
       // & execute in parallel...
@@ -231,6 +236,23 @@ namespace gnarly
         }
       };
 
+      float vfx = 0.15f;
+      float vfy = 0.15f;
+
+      f.KeyPress += (object sender, KeyPressEventArgs e) => {
+        if (e.KeyChar == '+') {
+          vfx *= 1.2f;
+          vfy *= 1.2f;
+          e.Handled = true;
+          Console.WriteLine(vfx);
+        } else if (e.KeyChar == '-') {
+          vfx *= 0.8f;
+          vfy *= 0.8f;
+          e.Handled = true;
+          Console.WriteLine(vfx);
+        }
+      };
+
       bool adrew = false;
 
       //queue.Execute(kernel, null, new long[] { WIDTH, HEIGHT }, null, null);
@@ -241,10 +263,15 @@ namespace gnarly
       while (true)
       {
         lock (loch) {
+          kernel.SetValueArgument(3, vfx);
+          kernel.SetValueArgument(4, vfy);
+          hkernel.SetValueArgument(3, vfx);
+          hkernel.SetValueArgument(4, vfy);
+
           if (debugpx) {
             Console.WriteLine("loop loch " + debugpxX + " " + debugpxY);
-            hkernel.SetValueArgument(3, (long) debugpxX);
-            hkernel.SetValueArgument(4, (long) debugpxY);
+            hkernel.SetValueArgument(5, (long) debugpxX);
+            hkernel.SetValueArgument(6, (long) debugpxY);
             queue.ExecuteTask(hkernel, null);
             queue.Finish();
             Console.WriteLine("CPU search results: ");

@@ -56,9 +56,9 @@ typedef struct
 } Ray;
 
 void setup_ray(Ray* ray, float3 origin, float3 direction);
-bool ray_aabb_intersection_distance(Ray* ray, float3* aabb);
-int getVoxelIntensityForPixelStep(Voxel* vox, Ray* ray, float3* aabb, float3* intersect, float3* backIntersect);
-float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y);
+bool ray_aabb_intersection_distance(Ray* ray, float3* aabb, float* distance);
+int getVoxelIntensityForPixelStep(Voxel* vox, Ray* ray, float3* aabb, float* intersect);
+float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y, float vfx, float vfy);
 
 void setup_ray(Ray* ray, float3 origin, float3 direction)
 {
@@ -92,27 +92,28 @@ void ray_aabb_intersection_distance2(Ray* ray, float3* aabb, float* tmin, float*
   //     back intersection point  = ray.origin + ray.direction * tmax
 }
 
-/*bool ray_aabb_intersection_distance(Ray* ray, float3* aabb) {
+bool ray_aabb_intersection_distance(Ray* ray, float3* aabb, float* intersect) {
   float tmin; float tmax;
   ray_aabb_intersection_distance2(ray, aabb, &tmin, &tmax);
+  *intersect = tmin; //ray->origin + ray->direction * tmin;
   return (tmin <= tmax) && isfinite(tmin) && isfinite(tmax) && !isnan(tmin) && !isnan(tmax);
-}*/
+}
 
-bool ray_aabb_intersection_distance(Ray* ray, float3* aabb) {
+/*bool ray_aabb_intersection_distance(Ray* ray, float3* aabb) {
   // VERY BAD
   if (ray->origin.x > aabb[0].x && ray->origin.y > aabb[0].y && ray->origin.x <= aabb[1].x && ray->origin.y <= aabb[1].y) {
     return true;
   } else {
     return false;
   }
-}
+}*/
 
-int getVoxelIntensityForPixelStep(Voxel* vox, Ray* ray, float3* aabb, float3* intersect, float3* backIntersect)
+int getVoxelIntensityForPixelStep(Voxel* vox, Ray* ray, float3* aabb, float* intersect)
 {
   // do we hit this voxel?
   bool tmin; float tmax;
   //ray_aabb_intersection_distance(ray, aabb, &tmin, &tmax);
-  tmin = ray_aabb_intersection_distance(ray, aabb);
+  tmin = ray_aabb_intersection_distance(ray, aabb, intersect);
 
   if (!tmin) {
     // no intersection
@@ -136,7 +137,7 @@ int getVoxelIntensityForPixelStep(Voxel* vox, Ray* ray, float3* aabb, float3* in
   }
 }
 
-float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
+float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y, float vfx, float vfy)
 {
   // assume voxel bounds are -256..256 for now.
   float3 aabb[2];
@@ -147,7 +148,8 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
   Ray ray;
   float3 direction = (float3)(0.0f, 0.0f, 1.0f);
   //float3 direction = normalize((float3)(-0.2f, 0.0f, 1.0f));
-  setup_ray(&ray, (float3)(x, y, 0.0f), direction);
+  //setup_ray(&ray, (float3)(x, y, 0.0f), direction);
+  setup_ray(&ray, (float3)(x, y, 0.0f), normalize((float3)(vfx * x / ((float)WIDTH), vfy * y / ((float)HEIGHT), 1.0f)));
 
   int r;
 
@@ -156,8 +158,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
   // copy voxel to private memory
   Voxel voxBig = voxels[sv];
   //printf("vox AFlags/FTL %d\n", voxBig.AFlags);
-  float3 intersect;
-  float3 backIntersect;
+  float intersect;
 
   // problem: we might need to search up to 3 subvoxels to get the right answer.
   // ringbuffer lets us search multiple subvoxels.
@@ -185,7 +186,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
   //while (true) {
     //printf("round %d\n", i);
     // do cast
-    r = getVoxelIntensityForPixelStep(&voxBig, &ray, aabb, &intersect, &backIntersect);
+    r = getVoxelIntensityForPixelStep(&voxBig, &ray, aabb, &intersect);
 
     if (r == 1) {
       // WE MUST GO DEEPER.
@@ -214,7 +215,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //printf("%s", "hi0\n");
       testaabb[0] = (float3)(minx, miny, minz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       //ir = ray.origin + ray.direction * tmin;
       if (tmin) {
         ring[ringBack] = voxels[voxBig.AFlags];
@@ -232,7 +233,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //printf("%s", "hi1\n");
       testaabb[0] = (float3)(midx, miny, minz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       //ir = ray.origin + ray.direction * tmin;
       if (tmin) {
         ring[ringBack] = voxels[voxBig.FTR];
@@ -250,7 +251,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //printf("%s", "hi2\n");
       testaabb[0] = (float3)(minx, midy, minz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       //ir = ray.origin + ray.direction * tmin;
 
       if (tmin) {
@@ -269,7 +270,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //printf("%s", "hi3\n");
       testaabb[0] = (float3)(midx, midy, minz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       //ir = ray.origin + ray.direction * tmin;
       if (tmin) {
         ring[ringBack] = voxels[voxBig.FBR];
@@ -288,7 +289,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       testaabb[0] = (float3)(minx, miny, midz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
       //printf("BTL 0 %f %f %f 1 %f %f %f\n", testaabb[0].x, testaabb[0].y, testaabb[0].z, testaabb[1].x, testaabb[1].y, testaabb[1].z);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       if (tmin) {
         ring[ringBack] = voxels[voxBig.BTL];
         ringInd[ringBack] = voxBig.BTL;
@@ -305,7 +306,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //printf("%s", "hi5\n");
       testaabb[0] = (float3)(midx, miny, midz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       if (tmin) {
         ring[ringBack] = voxels[voxBig.BTR];
         ringInd[ringBack] = voxBig.BTR;
@@ -321,7 +322,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       // BBL
       testaabb[0] = (float3)(minx, midy, midz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       if (tmin) {
         ring[ringBack] = voxels[voxBig.BBL];
         ringInd[ringBack] = voxBig.BBL;
@@ -337,7 +338,7 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       // BBR
       testaabb[0] = (float3)(midx, midy, midz);
       testaabb[1] = (float3)(testaabb[0].x + vs, testaabb[0].y + vs, testaabb[0].z + vs);
-      tmin = ray_aabb_intersection_distance(&ray, testaabb);
+      tmin = ray_aabb_intersection_distance(&ray, testaabb, &intersect);
       if (tmin) {
         ring[ringBack] = voxels[voxBig.BBR];
         ringInd[ringBack] = voxBig.BBR;
@@ -355,14 +356,14 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
       //printf("%s", "BRIGHT\n");
 
       // get distance
-      // XXX: just use z for now
-      if (aabb[0].z < bestDistance) {
+      //if (aabb[0].z < bestDistance) {
+      if (intersect < bestDistance) {
 #if HALP
         printf("%s", "best candidate now this voxel\n");
 #endif
         bestAabb0 = aabb[0];
         bestAabb1 = aabb[1];
-        bestDistance = aabb[0].z;
+        bestDistance = intersect;
         bestVoxel = voxBig;
       }
 
@@ -402,10 +403,12 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
         // blah blah todo specular
 
         // from voxel
-        float3 voxPosition = bestAabb0; // TODO: MAKE BETTER
+        /*float3 voxPosition = bestAabb0; // TODO: MAKE BETTER
         voxPosition.x = x;
-        voxPosition.y = y;
-        float3 viewDir = (float3)(0.0f, 0.0f, 1.0f);
+        voxPosition.y = y;*/
+        float3 voxPosition = ray.origin + ray.direction * bestDistance;
+        //float3 viewDir = (float3)(0.0f, 0.0f, 1.0f);
+        float3 viewDir = ray.direction;
         // sphere hack. should be stored on voxel or summat!
         float3 normal = normalize(voxPosition - (float3)(0.0f, 0.0f, 128.0f));
 
@@ -443,9 +446,9 @@ float getVoxelIntensityForPixel(global Voxel* voxels, uint sv, float x, float y)
 } // end getVoxelIntensityForPixel
 
 #ifdef HALP
-kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t outimg, size_t x, size_t y)
+kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t outimg, float vfx, float vfy, size_t x, size_t y)
 #else
-kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t outimg)
+kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t outimg, float vfx, float vfy)
 #endif
 {
   float f;
@@ -455,7 +458,6 @@ kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t out
   uint b;
   uint4 outc;
 
-
 #ifndef HALP
   size_t x = get_global_id(0);
   size_t y = get_global_id(1);
@@ -463,11 +465,8 @@ kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t out
   //for (int x = 0; x < HEIGHT; x++) {
   //printf("x %d y %d\n", x, y);
 #endif
-  //write_imageui(outimg, (int2)((int)x, (int)y), (uint4) ((uint) (x % 256), (uint) (y % 256), 0, 255));
 
-  //write_imageui(outimg, (int2)((int)x, (int)y), (uint4) (0, 0, 255, 255));
-
-  f = clamp(getVoxelIntensityForPixel(voxels, svox, (float)x - (float)WIDTH_DIV_2, (float)y - (float)HEIGHT_DIV_2), 0.0f, 1.0f);
+  f = clamp(getVoxelIntensityForPixel(voxels, svox, (float)x - (float)WIDTH_DIV_2, (float)y - (float)HEIGHT_DIV_2, vfx, vfy), 0.0f, 1.0f);
 
   // float -> uchar
   intensity = (uint) (255.0f * f);
@@ -481,7 +480,6 @@ kernel void helloVoxel(global Voxel* voxels, uint svox, write_only image2d_t out
 #endif
 #if HALP
   printf("image2d_t outimg x y %d %d R G B %d %d %d (fint %f)\n", x, y, r, g, b, f);
-  //outc = (uint4) (0, 255, 0, 255);
 #endif
 
   write_imageui(outimg, (int2)((int)x, (int)y), outc);
